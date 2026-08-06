@@ -1,23 +1,35 @@
 // BookReader Service Worker — Offline caching for PWA
 
 const CACHE_NAME = 'bookreader-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/css/styles.css',
-  '/js/app.js',
-  '/js/pdf-renderer.js',
-  '/js/library.js',
-  '/js/annotations.js',
-  '/js/bookmarks.js',
-  '/js/search.js',
-  '/js/settings.js',
-  '/manifest.json',
-  '/assets/icon-192.png',
-  '/assets/icon-512.png',
+
+// Detect base path dynamically (works on both localhost and GitHub Pages)
+const BASE = self.registration.scope;
+
+const RELATIVE_ASSETS = [
+  '',
+  'index.html',
+  'css/styles.css',
+  'js/app.js',
+  'js/pdf-renderer.js',
+  'js/library.js',
+  'js/annotations.js',
+  'js/bookmarks.js',
+  'js/search.js',
+  'js/settings.js',
+  'manifest.json',
+  'assets/icon-192.png',
+  'assets/icon-512.png',
+];
+
+const CDN_ASSETS = [
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs'
+];
+
+const ASSETS_TO_CACHE = [
+  ...RELATIVE_ASSETS.map(a => BASE + a),
+  ...CDN_ASSETS
 ];
 
 // Install — cache all core assets
