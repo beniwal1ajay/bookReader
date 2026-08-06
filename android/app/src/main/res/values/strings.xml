@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BookReader</string>
+    <string name="title_activity_main">BookReader</string>
+    <string name="package_name">com.beniwal1ajay.bookreader</string>
+    <string name="custom_url_scheme">com.beniwal1ajay.bookreader</string>
+</resources>

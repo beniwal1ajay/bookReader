@@ -1,0 +1,15 @@
+{
+  "name": "bookreader",
+  "version": "1.0.0",
+  "description": "A native PDF Book Reader",
+  "scripts": {
+    "build": "echo 'No build step required'"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.1",
+    "@capacitor/core": "^6.1.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.1"
+  }
+}

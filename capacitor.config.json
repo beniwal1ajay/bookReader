@@ -1,0 +1,6 @@
+{
+  "appId": "com.beniwal1ajay.bookreader",
+  "appName": "BookReader",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
