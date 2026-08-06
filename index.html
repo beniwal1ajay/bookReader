@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A premium local PDF book reader with annotations, bookmarks, dark mode, and more.">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BookReader">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>BookReader — PDF Reader</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+</head>
+<body>
+
+<!-- ===== LIBRARY VIEW ===== -->
+<div id="library-view" class="active">
+  <header class="library-header">
+    <div class="library-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      BookReader
+    </div>
+    <div class="library-actions">
+      <button class="btn btn-icon" id="theme-toggle-lib" data-tooltip="Toggle Theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </header>
+  <div class="library-content">
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-zone-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h2>Drop your PDF here</h2>
+      <p>or click to browse files</p>
+      <input type="file" id="file-input" accept=".pdf" class="hidden">
+    </div>
+    <div id="recent-section">
+      <div class="section-title">📚 Recent Books <span id="recent-count"></span></div>
+      <div class="books-grid" id="books-grid"></div>
+      <div class="empty-library hidden" id="empty-library">No recent books yet. Open a PDF to get started!</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== READER VIEW ===== -->
+<div id="reader-view">
+  <!-- Toolbar -->
+  <div class="toolbar" id="toolbar">
+    <div class="toolbar-group">
+      <button class="btn btn-icon" id="btn-back" data-tooltip="Library">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-sidebar" data-tooltip="Sidebar (S)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+      </button>
+    </div>
+    <div class="toolbar-group">
+      <button class="btn btn-icon" id="btn-prev" data-tooltip="Previous (←)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="page-nav">
+        <input type="number" class="page-input" id="page-input" min="1" value="1">
+        <span class="page-total">/ <span id="page-total">0</span></span>
+      </div>
+      <button class="btn btn-icon" id="btn-next" data-tooltip="Next (→)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <div class="toolbar-group">
+      <button class="btn btn-icon" id="btn-zoom-out" data-tooltip="Zoom Out (-)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      </button>
+      <span class="zoom-display" id="zoom-display">100%</span>
+      <button class="btn btn-icon" id="btn-zoom-in" data-tooltip="Zoom In (+)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-fit-width" data-tooltip="Fit Width">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 3H3v18h18V3z"/><path d="M9 3v18M15 3v18"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-fit-page" data-tooltip="Fit Page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="3" width="12" height="18" rx="1"/></svg>
+      </button>
+    </div>
+    <div class="toolbar-group">
+      <button class="btn btn-icon" id="btn-rotate" data-tooltip="Rotate (R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-bookmark" data-tooltip="Bookmark (B)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-highlight" data-tooltip="Highlight (H)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
+    </div>
+    <div class="toolbar-group">
+      <button class="btn btn-icon" id="btn-search" data-tooltip="Search (Ctrl+F)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-scroll-mode" data-tooltip="Scroll Mode">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-theme" data-tooltip="Theme (D)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-fullscreen" data-tooltip="Fullscreen (F)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btn-shortcuts" data-tooltip="Shortcuts (?)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Search Overlay -->
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-input-wrap">
+      <input type="text" class="search-input" id="search-input" placeholder="Search in document...">
+      <button class="btn btn-icon" id="search-prev" data-tooltip="Previous">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+      </button>
+      <button class="btn btn-icon" id="search-next" data-tooltip="Next">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <button class="btn btn-icon" id="search-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="search-info">
+      <span id="search-results-count"></span>
+    </div>
+  </div>
+
+  <!-- Main Reader -->
+  <div class="reader-main">
+    <!-- Sidebar -->
+    <aside class="sidebar collapsed" id="sidebar">
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" data-panel="toc-panel">Contents</button>
+        <button class="sidebar-tab" data-panel="thumbnails-panel">Pages</button>
+        <button class="sidebar-tab" data-panel="bookmarks-panel">Bookmarks</button>
+        <button class="sidebar-tab" data-panel="annotations-panel">Notes</button>
+      </div>
+      <div class="sidebar-panel active" id="toc-panel"></div>
+      <div class="sidebar-panel" id="thumbnails-panel"></div>
+      <div class="sidebar-panel" id="bookmarks-panel"></div>
+      <div class="sidebar-panel" id="annotations-panel"></div>
+    </aside>
+
+    <!-- PDF Canvas Area -->
+    <div class="canvas-container" id="canvas-container">
+      <div class="flex-center" style="height:100%;flex-direction:column;gap:12px">
+        <div class="loading-spinner" id="loading-spinner" style="display:none"></div>
+        <p id="loading-text" style="color:var(--text-muted);font-size:.9rem"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Annotation Toolbar -->
+  <div class="annotation-toolbar" id="annotation-toolbar">
+    <span style="font-size:.82rem;font-weight:500;margin-right:4px">Highlight:</span>
+    <div class="color-options">
+      <div class="color-dot yellow active" data-color="yellow"></div>
+      <div class="color-dot green" data-color="green"></div>
+      <div class="color-dot blue" data-color="blue"></div>
+      <div class="color-dot pink" data-color="pink"></div>
+      <div class="color-dot orange" data-color="orange"></div>
+    </div>
+    <div class="toolbar-separator"></div>
+    <button class="btn btn-icon" id="btn-add-note" data-tooltip="Add Note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+    </button>
+    <button class="btn btn-icon" id="btn-close-annotation" data-tooltip="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar" id="status-bar">
+    <span id="status-filename"></span>
+    <span id="status-page">Page 1 of 1</span>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+    <span id="status-progress">0%</span>
+    <span class="reading-mode-badge" id="reading-mode-badge">Dark</span>
+  </div>
+</div>
+
+<!-- ===== MODALS ===== -->
+
+<!-- Keyboard Shortcuts Modal -->
+<div class="modal-overlay" id="shortcuts-modal">
+  <div class="modal">
+    <h2>⌨️ Keyboard Shortcuts</h2>
+    <div class="shortcut-grid">
+      <div class="shortcut-item"><span>Previous page</span><span class="shortcut-key">←</span></div>
+      <div class="shortcut-item"><span>Next page</span><span class="shortcut-key">→</span></div>
+      <div class="shortcut-item"><span>Zoom in</span><span class="shortcut-key">+</span></div>
+      <div class="shortcut-item"><span>Zoom out</span><span class="shortcut-key">-</span></div>
+      <div class="shortcut-item"><span>Search</span><span class="shortcut-key">Ctrl+F</span></div>
+      <div class="shortcut-item"><span>Go to page</span><span class="shortcut-key">Ctrl+G</span></div>
+      <div class="shortcut-item"><span>Fullscreen</span><span class="shortcut-key">F</span></div>
+      <div class="shortcut-item"><span>Sidebar</span><span class="shortcut-key">S</span></div>
+      <div class="shortcut-item"><span>Bookmark</span><span class="shortcut-key">B</span></div>
+      <div class="shortcut-item"><span>Highlight</span><span class="shortcut-key">H</span></div>
+      <div class="shortcut-item"><span>Toggle theme</span><span class="shortcut-key">D</span></div>
+      <div class="shortcut-item"><span>Rotate</span><span class="shortcut-key">R</span></div>
+      <div class="shortcut-item"><span>Shortcuts</span><span class="shortcut-key">?</span></div>
+      <div class="shortcut-item"><span>Close</span><span class="shortcut-key">Esc</span></div>
+    </div>
+    <div style="margin-top:20px;text-align:right">
+      <button class="btn btn-primary" id="shortcuts-close">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- Go-to-Page Modal -->
+<div class="modal-overlay" id="goto-modal">
+  <div class="modal" style="max-width:320px">
+    <h2>📄 Go to Page</h2>
+    <input type="number" class="goto-input" id="goto-input" placeholder="Page number" min="1">
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" id="goto-cancel">Cancel</button>
+      <button class="btn btn-primary" id="goto-go">Go</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+<script type="module" src="js/app.js"></script>
+
+<!-- PWA Service Worker Registration -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(reg => console.log('SW registered:', reg.scope))
+        .catch(err => console.log('SW registration failed:', err));
+    });
+  }
+</script>
+
+</body>
+</html>
