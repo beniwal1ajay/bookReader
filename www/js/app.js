@@ -26,6 +26,7 @@ class App {
     this.search = new Search();
     this.renderer = new PDFRenderer(pdfjsLib);
     this.library = new Library((file) => this.openFile(file));
+    this.library.onCachedOpen = (data, name, size) => this.openCachedFile(data, name, size);
 
     this.renderer.onPageChange = (page, total) => this.onPageChange(page, total);
     this.renderer.onDocLoaded = (doc, name, size) => this.onDocLoaded(doc, name, size);
@@ -59,10 +60,27 @@ class App {
       this.currentFileName = file.name;
       this.currentDocId = this.library.generateDocId(file.name, file.size);
 
+      // Cache the PDF data in IndexedDB for re-opening later
+      this.library.storePDF(this.currentDocId, arrayBuffer);
+
       this.showView('reader');
       await this.renderer.loadDocument(data, file.name, file.size);
     } catch(err) {
       this.toast('Failed to open PDF: ' + err.message, 'error');
+      this.showView('library');
+    }
+  }
+
+  async openCachedFile(arrayBuffer, name, size) {
+    try {
+      const data = new Uint8Array(arrayBuffer);
+      this.currentFileName = name;
+      this.currentDocId = this.library.generateDocId(name, size);
+
+      this.showView('reader');
+      await this.renderer.loadDocument(data, name, size);
+    } catch(err) {
+      this.toast('Failed to open cached PDF: ' + err.message, 'error');
       this.showView('library');
     }
   }
@@ -72,15 +90,13 @@ class App {
 
     // Resume last position
     const lastPage = this.bookmarks.getLastPage(this.currentDocId);
-    this.renderer.fitWidth();
+    await this.renderer.fitWidth();
 
-    // Small delay for fitWidth to complete, then go to last page
-    setTimeout(() => {
-      if (lastPage > 1) {
-        this.renderer.goToPage(lastPage);
-        this.toast(`Resumed from page ${lastPage}`, 'info');
-      }
-    }, 300);
+    // After fitWidth completes, go to last page
+    if (lastPage > 1) {
+      this.renderer.goToPage(lastPage);
+      this.toast(`Resumed from page ${lastPage}`, 'info');
+    }
 
     // Update status bar
     document.getElementById('status-filename').textContent = fileName.replace('.pdf', '');

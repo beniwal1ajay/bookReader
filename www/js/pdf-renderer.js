@@ -240,25 +240,44 @@ export class PDFRenderer {
     }
   }
 
-  fitWidth() {
-    if (!this.pdfDoc) return;
-    this.pdfDoc.getPage(this.currentPage).then(page => {
-      const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
-      const containerWidth = this.container.clientWidth - 40;
-      this.setZoom(containerWidth / viewport.width);
+  // Wait for the container to have non-zero dimensions (needed after view transitions)
+  _waitForContainer(maxRetries = 30) {
+    return new Promise((resolve) => {
+      let retries = 0;
+      const check = () => {
+        if (this.container.clientWidth > 0 && this.container.clientHeight > 0) {
+          resolve();
+        } else if (retries++ < maxRetries) {
+          requestAnimationFrame(check);
+        } else {
+          resolve(); // give up, use whatever dimensions we have
+        }
+      };
+      check();
     });
   }
 
-  fitPage() {
+  async fitWidth() {
     if (!this.pdfDoc) return;
-    this.pdfDoc.getPage(this.currentPage).then(page => {
-      const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
-      const containerWidth = this.container.clientWidth - 40;
-      const containerHeight = this.container.clientHeight - 40;
-      const scaleW = containerWidth / viewport.width;
-      const scaleH = containerHeight / viewport.height;
-      this.setZoom(Math.min(scaleW, scaleH));
-    });
+    await this._waitForContainer();
+    const page = await this.pdfDoc.getPage(this.currentPage);
+    const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
+    const containerWidth = this.container.clientWidth - 20;
+    if (containerWidth <= 0) return;
+    this.setZoom(Math.max(0.1, containerWidth / viewport.width));
+  }
+
+  async fitPage() {
+    if (!this.pdfDoc) return;
+    await this._waitForContainer();
+    const page = await this.pdfDoc.getPage(this.currentPage);
+    const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
+    const containerWidth = this.container.clientWidth - 20;
+    const containerHeight = this.container.clientHeight - 20;
+    if (containerWidth <= 0 || containerHeight <= 0) return;
+    const scaleW = containerWidth / viewport.width;
+    const scaleH = containerHeight / viewport.height;
+    this.setZoom(Math.max(0.1, Math.min(scaleW, scaleH)));
   }
 
   rotate() {

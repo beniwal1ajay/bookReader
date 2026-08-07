@@ -1,16 +1,87 @@
 // ===== Library Module =====
-// Library view, recent files, drag-and-drop handling
+// Library view, recent files, drag-and-drop handling, IndexedDB PDF caching
 
 export class Library {
   constructor(onFileOpen) {
     this.onFileOpen = onFileOpen;
+    this.onCachedOpen = null; // callback for opening cached PDF data: (arrayBuffer, name, size) => {}
     this.recentBooks = [];
+    this.db = null;
+    this._initDB();
     this.load();
     this.setupDropZone();
     this.setupFileInput();
     this.render();
   }
 
+  // ===== IndexedDB =====
+  _initDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('BookReaderDB', 1);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('pdfs')) {
+          db.createObjectStore('pdfs');
+        }
+      };
+      request.onsuccess = (e) => {
+        this.db = e.target.result;
+        resolve(this.db);
+      };
+      request.onerror = (e) => {
+        console.error('IndexedDB error:', e);
+        resolve(null);
+      };
+    });
+  }
+
+  async _getDB() {
+    if (this.db) return this.db;
+    return this._initDB();
+  }
+
+  async storePDF(docId, arrayBuffer) {
+    try {
+      const db = await this._getDB();
+      if (!db) return;
+      const tx = db.transaction('pdfs', 'readwrite');
+      const store = tx.objectStore('pdfs');
+      store.put(arrayBuffer, docId);
+    } catch (e) {
+      console.error('Failed to store PDF:', e);
+    }
+  }
+
+  async getPDF(docId) {
+    try {
+      const db = await this._getDB();
+      if (!db) return null;
+      return new Promise((resolve) => {
+        const tx = db.transaction('pdfs', 'readonly');
+        const store = tx.objectStore('pdfs');
+        const request = store.get(docId);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => resolve(null);
+      });
+    } catch (e) {
+      console.error('Failed to get PDF:', e);
+      return null;
+    }
+  }
+
+  async removePDF(docId) {
+    try {
+      const db = await this._getDB();
+      if (!db) return;
+      const tx = db.transaction('pdfs', 'readwrite');
+      const store = tx.objectStore('pdfs');
+      store.delete(docId);
+    } catch (e) {
+      console.error('Failed to remove PDF:', e);
+    }
+  }
+
+  // ===== Local Storage =====
   load() {
     try {
       this.recentBooks = JSON.parse(localStorage.getItem('br_recent')) || [];
@@ -38,6 +109,10 @@ export class Library {
   }
 
   removeRecent(name) {
+    const book = this.recentBooks.find(b => b.name === name);
+    if (book) {
+      this.removePDF(book.docId);
+    }
     this.recentBooks = this.recentBooks.filter(b => b.name !== name);
     this.save();
     this.render();
@@ -129,7 +204,7 @@ export class Library {
       const percent = progress ? Math.round((progress.lastPage / progress.totalPages) * 100) : 0;
 
       return `
-        <div class="book-card" data-name="${book.name}" data-size="${book.fileSize}">
+        <div class="book-card" data-name="${book.name}" data-size="${book.fileSize}" data-docid="${book.docId}">
           <button class="remove-btn" data-remove="${book.name}" title="Remove">✕</button>
           <div class="book-card-icon">
             <svg viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="1.5"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -146,13 +221,25 @@ export class Library {
       `;
     }).join('');
 
-    // Card click handlers
+    // Card click handlers — try to load from IndexedDB cache first
     grid.querySelectorAll('.book-card').forEach(card => {
-      card.addEventListener('click', (e) => {
+      card.addEventListener('click', async (e) => {
         if (e.target.classList.contains('remove-btn')) return;
-        // Since we can't re-open file from localStorage, prompt user
-        const fileInput = document.getElementById('file-input');
-        fileInput.click();
+
+        const docId = card.dataset.docid;
+        const name = card.dataset.name;
+        const size = parseInt(card.dataset.size) || 0;
+
+        // Try loading from IndexedDB cache
+        const cachedData = await this.getPDF(docId);
+        if (cachedData && this.onCachedOpen) {
+          this.onCachedOpen(cachedData, name, size);
+        } else {
+          // Fallback: prompt user to re-select the file
+          this._showToast('Please re-select the file to open it');
+          const fileInput = document.getElementById('file-input');
+          fileInput.click();
+        }
       });
     });
 
@@ -163,5 +250,20 @@ export class Library {
         this.removeRecent(btn.dataset.remove);
       });
     });
+  }
+
+  _showToast(msg) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast info';
+    toast.innerHTML = `<span>ℹ</span> ${msg}`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(20px)';
+      toast.style.transition = 'all .3s';
+      setTimeout(() => toast.remove(), 300);
+    }, 2500);
   }
 }

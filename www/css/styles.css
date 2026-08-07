@@ -468,9 +468,131 @@ body {
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .library-header { padding: 20px 24px 0; }
-  .library-content { padding: 20px 24px; }
+  /* Library */
+  .library-header { padding: 16px 16px 0; }
+  .library-logo { font-size: 1.2rem; gap: 10px; }
+  .library-logo svg { width: 28px; height: 28px; }
+  .library-content { padding: 16px; }
+  .drop-zone { padding: 30px 20px; margin-bottom: 20px; }
+  .drop-zone-icon svg { width: 40px; height: 40px; }
+  .drop-zone h2 { font-size: 1rem; }
+  .books-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .book-card { padding: 14px; }
+  .book-card-icon svg { width: 32px; height: 32px; }
+  .book-card-title { font-size: .84rem; }
+
+  /* Sidebar */
   .sidebar { width: 240px; }
   .sidebar.collapsed { margin-left: -240px; }
-  .books-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+
+  /* Toolbar — compact horizontal scrolling */
+  .toolbar {
+    height: 44px;
+    padding: 0 8px;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+  }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar-group {
+    gap: 0;
+    padding: 0 3px;
+    flex-shrink: 0;
+  }
+  .btn-icon {
+    padding: 6px;
+  }
+  .btn-icon svg, .btn svg {
+    width: 16px;
+    height: 16px;
+  }
+  .page-input { width: 38px; font-size: .78rem; padding: 3px; }
+  .page-nav { gap: 4px; font-size: .78rem; }
+  .page-total { font-size: .75rem; }
+  .zoom-display { font-size: .72rem; min-width: 36px; }
+
+  /* Canvas — maximize viewport usage */
+  .canvas-container {
+    padding: 8px;
+  }
+
+  /* Status bar — compact */
+  .status-bar {
+    height: 26px;
+    padding: 0 10px;
+    font-size: .68rem;
+    gap: 8px;
+  }
+  .reading-mode-badge {
+    font-size: .62rem;
+    padding: 1px 6px;
+  }
+
+  /* Search overlay */
+  .search-overlay {
+    right: 8px;
+    left: 8px;
+    min-width: auto;
+  }
+
+  /* Annotation toolbar */
+  .annotation-toolbar {
+    bottom: 60px;
+    padding: 8px 12px;
+  }
+
+  /* Toast */
+  .toast-container {
+    bottom: 36px;
+    right: 10px;
+    left: 10px;
+  }
+  .toast {
+    font-size: .78rem;
+    padding: 10px 14px;
+    max-width: 100%;
+  }
+
+  /* Modals */
+  .modal { padding: 20px; }
+  .shortcut-grid { grid-template-columns: 1fr; }
+}
+
+/* Extra small screens (phones in portrait) */
+@media (max-width: 480px) {
+  .toolbar {
+    height: 40px;
+    padding: 0 4px;
+  }
+  .btn-icon {
+    padding: 5px;
+  }
+  .btn-icon svg, .btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  .canvas-container {
+    padding: 4px;
+  }
+  .page-input { width: 34px; font-size: .72rem; }
+  .zoom-display { font-size: .68rem; min-width: 30px; }
+  .drop-zone { padding: 20px 14px; }
+  .drop-zone h2 { font-size: .9rem; }
+  .drop-zone p { font-size: .78rem; }
+  .books-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+}
+
+/* Safe area for devices with notches / rounded corners */
+@supports (padding: env(safe-area-inset-top)) {
+  .toolbar {
+    padding-top: env(safe-area-inset-top);
+  }
+  .status-bar {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .library-header {
+    padding-top: calc(16px + env(safe-area-inset-top));
+  }
 }
