@@ -1,5 +1,5 @@
 // ===== PDF Renderer Module =====
-// Handles PDF.js document loading, page rendering, zoom, rotation, text layer
+// High-performance PDF.js renderer with viewport virtualization for continuous scroll mode
 
 export class PDFRenderer {
   constructor(pdfjsLib) {
@@ -11,10 +11,11 @@ export class PDFRenderer {
     this.rotation = 0;
     this.scrollMode = 'single'; // 'single' or 'continuous'
     this.rendering = false;
-    this.renderQueue = null; // queued page number to render after current finishes
-    this.pageCache = new Map();
     this.container = document.getElementById('canvas-container');
-    this.scrollObserver = null; // track observer so we can disconnect
+    this.scrollObserver = null;
+    this.pageAspectRatios = new Map(); // pageNum -> aspect ratio (width / height)
+    this.renderedPages = new Set(); // page numbers currently rendered with canvas
+    this.renderingPages = new Set(); // page numbers currently in rendering pipeline
     this.fileName = '';
     this.fileSize = 0;
     this.onPageChange = null;
@@ -28,13 +29,28 @@ export class PDFRenderer {
     this.showLoading('Loading document...');
 
     try {
+      // Clean up previous observer & rendered pages
+      if (this.scrollObserver) {
+        this.scrollObserver.disconnect();
+        this.scrollObserver = null;
+      }
+      this.renderedPages.clear();
+      this.renderingPages.clear();
+      this.pageAspectRatios.clear();
+
       const loadingTask = this.pdfjsLib.getDocument({ data: fileData });
       this.pdfDoc = await loadingTask.promise;
       this.totalPages = this.pdfDoc.numPages;
       this.rotation = 0;
-      this.rendering = false;
-      this.renderQueue = null;
-      this.pageCache.clear();
+
+      // Pre-calculate page aspect ratios from first page or all pages efficiently
+      const firstPage = await this.pdfDoc.getPage(1);
+      const firstViewport = firstPage.getViewport({ scale: 1 });
+      const defaultAspect = firstViewport.width / firstViewport.height;
+
+      for (let i = 1; i <= this.totalPages; i++) {
+        this.pageAspectRatios.set(i, defaultAspect);
+      }
 
       document.getElementById('page-total').textContent = this.totalPages;
       document.getElementById('page-input').max = this.totalPages;
@@ -53,134 +69,61 @@ export class PDFRenderer {
 
   async renderPage(pageNum, forceRerender = false) {
     if (!this.pdfDoc || pageNum < 1 || pageNum > this.totalPages) return;
-
-    // If already rendering, queue the request instead of dropping it
-    if (this.rendering && !forceRerender) {
-      this.renderQueue = pageNum;
-      return;
-    }
-
-    this.rendering = true;
     this.currentPage = pageNum;
 
-    try {
-      if (this.scrollMode === 'single') {
-        await this.renderSinglePage(pageNum);
-      } else {
-        // In continuous mode, just scroll to the page
-        const wrapper = this.container.querySelector(`.page-wrapper[data-page="${pageNum}"]`);
-        if (wrapper) {
-          wrapper.scrollIntoView({ behavior: 'smooth' });
-        }
+    if (this.scrollMode === 'single') {
+      await this.renderSinglePage(pageNum, forceRerender);
+    } else {
+      // In continuous mode, scroll to the target page wrapper
+      const wrapper = this.container.querySelector(`.page-wrapper[data-page="${pageNum}"]`);
+      if (wrapper) {
+        wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      // Update page input
-      document.getElementById('page-input').value = pageNum;
-      if (this.onPageChange) this.onPageChange(pageNum, this.totalPages);
-    } catch (err) {
-      console.error('Render error:', err);
     }
 
-    this.rendering = false;
-
-    // Process queued render request
-    if (this.renderQueue !== null) {
-      const queuedPage = this.renderQueue;
-      this.renderQueue = null;
-      await this.renderPage(queuedPage);
-    }
+    document.getElementById('page-input').value = pageNum;
+    if (this.onPageChange) this.onPageChange(pageNum, this.totalPages);
   }
 
-  async renderSinglePage(pageNum) {
-    const page = await this.pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: this.scale, rotation: this.rotation });
+  async renderSinglePage(pageNum, forceRerender = false) {
+    if (this.rendering && !forceRerender) return;
+    this.rendering = true;
 
-    // Clear container and create wrapper
-    this.container.innerHTML = '';
-    const wrapper = document.createElement('div');
-    wrapper.className = 'page-wrapper';
-    wrapper.dataset.page = pageNum;
-    wrapper.style.width = viewport.width + 'px';
-    wrapper.style.height = viewport.height + 'px';
-
-    // Canvas
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = viewport.width + 'px';
-    canvas.style.height = viewport.height + 'px';
-    ctx.scale(dpr, dpr);
-
-    wrapper.appendChild(canvas);
-
-    // Text layer
-    const textLayer = document.createElement('div');
-    textLayer.className = 'text-layer';
-    textLayer.style.width = viewport.width + 'px';
-    textLayer.style.height = viewport.height + 'px';
-    wrapper.appendChild(textLayer);
-
-    // Annotation layer
-    const annotationLayer = document.createElement('div');
-    annotationLayer.className = 'annotation-layer';
-    annotationLayer.dataset.page = pageNum;
-    wrapper.appendChild(annotationLayer);
-
-    this.container.appendChild(wrapper);
-
-    // Render canvas
-    await page.render({ canvasContext: ctx, viewport }).promise;
-
-    // Render text layer
-    const textContent = await page.getTextContent();
-    this.renderTextLayer(textContent, textLayer, viewport);
-
-    // Scroll to top
-    this.container.scrollTop = 0;
-
-    return { wrapper, textLayer, annotationLayer, viewport, page };
-  }
-
-  async renderContinuous(scrollToPage = null) {
-    // Disconnect old observer
-    if (this.scrollObserver) {
-      this.scrollObserver.disconnect();
-      this.scrollObserver = null;
-    }
-
-    const targetPage = scrollToPage || this.currentPage;
-    this.container.innerHTML = '';
-
-    for (let i = 1; i <= this.totalPages; i++) {
-      const page = await this.pdfDoc.getPage(i);
+    try {
+      const page = await this.pdfDoc.getPage(pageNum);
       const viewport = page.getViewport({ scale: this.scale, rotation: this.rotation });
+
+      // Explicitly release memory of old canvases in container before re-creating
+      this.container.querySelectorAll('canvas').forEach(c => {
+        c.width = 0; c.height = 0;
+      });
+      this.container.innerHTML = '';
 
       const wrapper = document.createElement('div');
       wrapper.className = 'page-wrapper';
-      wrapper.dataset.page = i;
-      wrapper.style.width = viewport.width + 'px';
-      wrapper.style.height = viewport.height + 'px';
+      wrapper.dataset.page = pageNum;
+      wrapper.style.width = Math.floor(viewport.width) + 'px';
+      wrapper.style.height = Math.floor(viewport.height) + 'px';
 
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap DPR to 2 to prevent GPU OOM on mobile
       canvas.width = Math.floor(viewport.width * dpr);
       canvas.height = Math.floor(viewport.height * dpr);
-      canvas.style.width = viewport.width + 'px';
-      canvas.style.height = viewport.height + 'px';
+      canvas.style.width = Math.floor(viewport.width) + 'px';
+      canvas.style.height = Math.floor(viewport.height) + 'px';
       ctx.scale(dpr, dpr);
       wrapper.appendChild(canvas);
 
       const textLayer = document.createElement('div');
       textLayer.className = 'text-layer';
-      textLayer.style.width = viewport.width + 'px';
-      textLayer.style.height = viewport.height + 'px';
+      textLayer.style.width = Math.floor(viewport.width) + 'px';
+      textLayer.style.height = Math.floor(viewport.height) + 'px';
       wrapper.appendChild(textLayer);
 
       const annotationLayer = document.createElement('div');
       annotationLayer.className = 'annotation-layer';
-      annotationLayer.dataset.page = i;
+      annotationLayer.dataset.page = pageNum;
       wrapper.appendChild(annotationLayer);
 
       this.container.appendChild(wrapper);
@@ -188,53 +131,193 @@ export class PDFRenderer {
       await page.render({ canvasContext: ctx, viewport }).promise;
       const textContent = await page.getTextContent();
       this.renderTextLayer(textContent, textLayer, viewport);
+
+      this.container.scrollTop = 0;
+    } catch (err) {
+      console.error('Render single page error:', err);
+    } finally {
+      this.rendering = false;
+    }
+  }
+
+  // ===== Virtualized Continuous Scroll Mode =====
+  // Builds lightweight placeholder wrappers for all pages; renders canvases ONLY when in viewport
+  setupContinuousMode(scrollToPage = null) {
+    if (!this.pdfDoc) return;
+
+    if (this.scrollObserver) {
+      this.scrollObserver.disconnect();
+      this.scrollObserver = null;
     }
 
-    // Scroll to the target page after rendering
+    // Release old canvas memory
+    this.container.querySelectorAll('canvas').forEach(c => {
+      c.width = 0; c.height = 0;
+    });
+    this.container.innerHTML = '';
+    this.renderedPages.clear();
+    this.renderingPages.clear();
+
+    const targetPage = scrollToPage || this.currentPage;
+
+    // Create lightweight placeholder DOM elements for all pages
+    const fragment = document.createDocumentFragment();
+
+    for (let i = 1; i <= this.totalPages; i++) {
+      const aspect = this.pageAspectRatios.get(i) || 0.75;
+      const containerWidth = Math.max(280, this.container.clientWidth - 20);
+      const width = Math.floor(containerWidth * (this.scale || 1.0));
+      const height = Math.floor(width / aspect);
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'page-wrapper placeholder';
+      wrapper.dataset.page = i;
+      wrapper.style.width = width + 'px';
+      wrapper.style.height = height + 'px';
+      wrapper.style.minHeight = height + 'px';
+
+      fragment.appendChild(wrapper);
+    }
+
+    this.container.appendChild(fragment);
+
+    // Instant scroll to current page
     const targetWrapper = this.container.querySelector(`.page-wrapper[data-page="${targetPage}"]`);
     if (targetWrapper) {
-      // Use instant scroll so user sees the right page immediately
       targetWrapper.scrollIntoView({ behavior: 'instant', block: 'start' });
     }
 
-    // Setup scroll observer for continuous mode
-    this.setupScrollObserver();
+    // Initialize IntersectionObserver for lazy canvas rendering & unrendering
+    this.setupVirtualizationObserver();
   }
 
-  setupScrollObserver() {
-    // Disconnect old observer if any
+  setupVirtualizationObserver() {
     if (this.scrollObserver) {
       this.scrollObserver.disconnect();
     }
 
+    // Margin around viewport to pre-render adjacent pages (300px above & below)
+    const options = {
+      root: this.container,
+      rootMargin: '300px 0px 300px 0px',
+      threshold: 0.01
+    };
+
+    let debounceTimer = null;
+
     this.scrollObserver = new IntersectionObserver((entries) => {
-      // Find the most visible page
-      let bestEntry = null;
-      let bestRatio = 0;
+      let mostVisiblePage = this.currentPage;
+      let maxRatio = 0;
+
       entries.forEach(entry => {
-        if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
-          bestRatio = entry.intersectionRatio;
-          bestEntry = entry;
+        const pageNum = parseInt(entry.target.dataset.page);
+        if (!pageNum) return;
+
+        if (entry.isIntersecting) {
+          // Render page canvas if not already rendered or rendering
+          if (!this.renderedPages.has(pageNum) && !this.renderingPages.has(pageNum)) {
+            this.renderPageCanvas(pageNum, entry.target);
+          }
+
+          if (entry.intersectionRatio > maxRatio) {
+            maxRatio = entry.intersectionRatio;
+            mostVisiblePage = pageNum;
+          }
+        } else {
+          // Unload off-screen page canvas to free GPU memory!
+          if (this.renderedPages.has(pageNum)) {
+            this.unloadPageCanvas(entry.target, pageNum);
+          }
         }
       });
 
-      if (bestEntry) {
-        const pageNum = parseInt(bestEntry.target.dataset.page);
-        if (pageNum && pageNum !== this.currentPage) {
-          this.currentPage = pageNum;
-          document.getElementById('page-input').value = pageNum;
-          if (this.onPageChange) this.onPageChange(pageNum, this.totalPages);
-        }
+      // Update current page with debounce to avoid firing heavy handlers on every scroll tick
+      if (mostVisiblePage && mostVisiblePage !== this.currentPage) {
+        this.currentPage = mostVisiblePage;
+        document.getElementById('page-input').value = mostVisiblePage;
+
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          if (this.onPageChange) this.onPageChange(this.currentPage, this.totalPages);
+        }, 80);
       }
-    }, { root: this.container, threshold: [0.1, 0.25, 0.5, 0.75] });
+    }, options);
 
     this.container.querySelectorAll('.page-wrapper').forEach(w => this.scrollObserver.observe(w));
+  }
+
+  async renderPageCanvas(pageNum, wrapper) {
+    if (this.renderedPages.has(pageNum) || this.renderingPages.has(pageNum)) return;
+    this.renderingPages.add(pageNum);
+
+    try {
+      const page = await this.pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: this.scale, rotation: this.rotation });
+
+      // Update aspect ratio & exact dimensions
+      const aspect = viewport.width / viewport.height;
+      this.pageAspectRatios.set(pageNum, aspect);
+
+      wrapper.style.width = Math.floor(viewport.width) + 'px';
+      wrapper.style.height = Math.floor(viewport.height) + 'px';
+      wrapper.classList.remove('placeholder');
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap DPR to 2 for mobile GPU protection
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = Math.floor(viewport.width) + 'px';
+      canvas.style.height = Math.floor(viewport.height) + 'px';
+      ctx.scale(dpr, dpr);
+      wrapper.appendChild(canvas);
+
+      const textLayer = document.createElement('div');
+      textLayer.className = 'text-layer';
+      textLayer.style.width = Math.floor(viewport.width) + 'px';
+      textLayer.style.height = Math.floor(viewport.height) + 'px';
+      wrapper.appendChild(textLayer);
+
+      const annotationLayer = document.createElement('div');
+      annotationLayer.className = 'annotation-layer';
+      annotationLayer.dataset.page = pageNum;
+      wrapper.appendChild(annotationLayer);
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const textContent = await page.getTextContent();
+      this.renderTextLayer(textContent, textLayer, viewport);
+
+      this.renderedPages.add(pageNum);
+
+      // Trigger annotation rendering for newly visible page if callback registered
+      if (this.onPageChange) {
+        this.onPageChange(this.currentPage, this.totalPages);
+      }
+    } catch (err) {
+      console.error(`Error rendering page ${pageNum}:`, err);
+    } finally {
+      this.renderingPages.delete(pageNum);
+    }
+  }
+
+  unloadPageCanvas(wrapper, pageNum) {
+    // Clear canvas context size to force GPU VRAM garbage collection immediately
+    const canvas = wrapper.querySelector('canvas');
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    wrapper.innerHTML = '';
+    wrapper.classList.add('placeholder');
+    this.renderedPages.delete(pageNum);
   }
 
   renderTextLayer(textContent, textLayerDiv, viewport) {
     textLayerDiv.innerHTML = '';
     const textItems = textContent.items;
 
+    const fragment = document.createDocumentFragment();
     textItems.forEach(item => {
       const span = document.createElement('span');
       const tx = this.pdfjsLib.Util.transform(viewport.transform, item.transform);
@@ -250,106 +333,73 @@ export class PDFRenderer {
         const expectedWidth = item.width * viewport.scale;
         span.style.transform = `scaleX(${expectedWidth / (item.str.length * fontSize * 0.5 || 1)})`;
       }
-      textLayerDiv.appendChild(span);
+      fragment.appendChild(span);
     });
+    textLayerDiv.appendChild(fragment);
   }
 
-  // Navigation
+  // ===== Navigation =====
   nextPage() {
     if (this.currentPage < this.totalPages) {
-      this.goToPage(this.currentPage + 1);
+      this.renderPage(this.currentPage + 1);
     }
   }
 
   prevPage() {
     if (this.currentPage > 1) {
-      this.goToPage(this.currentPage - 1);
+      this.renderPage(this.currentPage - 1);
     }
   }
 
   goToPage(num) {
     const p = Math.max(1, Math.min(num, this.totalPages));
-    if (this.scrollMode === 'continuous') {
-      const wrapper = this.container.querySelector(`.page-wrapper[data-page="${p}"]`);
-      if (wrapper) {
-        wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      this.currentPage = p;
-      document.getElementById('page-input').value = p;
-      if (this.onPageChange) this.onPageChange(p, this.totalPages);
-    } else {
-      this.renderPage(p);
-    }
+    this.renderPage(p);
   }
 
-  // Zoom
-  zoomIn() { this.setZoom(Math.min(this.scale + 0.2, 5.0)); }
-  zoomOut() { this.setZoom(Math.max(this.scale - 0.2, 0.3)); }
+  // ===== Zoom & Layout =====
+  zoomIn() { this.setZoom(Math.min(this.scale + 0.25, 4.0)); }
+  zoomOut() { this.setZoom(Math.max(this.scale - 0.25, 0.4)); }
 
   setZoom(newScale) {
     const savedPage = this.currentPage;
     this.scale = Math.round(newScale * 100) / 100;
     document.getElementById('zoom-display').textContent = Math.round(this.scale * 100) + '%';
-    if (this.scrollMode === 'continuous') {
-      this.renderContinuous(savedPage);
-    } else {
-      this.renderPage(savedPage, true);
-    }
-  }
 
-  // Wait for the container to have non-zero dimensions (needed after view transitions)
-  _waitForContainer(maxRetries = 30) {
-    return new Promise((resolve) => {
-      let retries = 0;
-      const check = () => {
-        if (this.container.clientWidth > 0 && this.container.clientHeight > 0) {
-          resolve();
-        } else if (retries++ < maxRetries) {
-          requestAnimationFrame(check);
-        } else {
-          resolve(); // give up, use whatever dimensions we have
-        }
-      };
-      check();
-    });
+    if (this.scrollMode === 'continuous') {
+      this.setupContinuousMode(savedPage);
+    } else {
+      this.renderSinglePage(savedPage, true);
+    }
   }
 
   async fitWidth() {
     if (!this.pdfDoc) return;
-    await this._waitForContainer();
     const page = await this.pdfDoc.getPage(this.currentPage);
     const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
-    const containerWidth = this.container.clientWidth - 20;
+    const containerWidth = Math.max(280, this.container.clientWidth - 20);
     if (containerWidth <= 0) return;
-    const newScale = Math.max(0.1, containerWidth / viewport.width);
-    // Only re-render if scale actually changed
-    if (Math.abs(newScale - this.scale) > 0.01) {
-      this.setZoom(newScale);
-    }
+    const newScale = Math.max(0.2, containerWidth / viewport.width);
+    this.setZoom(newScale);
   }
 
   async fitPage() {
     if (!this.pdfDoc) return;
-    await this._waitForContainer();
     const page = await this.pdfDoc.getPage(this.currentPage);
     const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
-    const containerWidth = this.container.clientWidth - 20;
-    const containerHeight = this.container.clientHeight - 20;
-    if (containerWidth <= 0 || containerHeight <= 0) return;
+    const containerWidth = Math.max(280, this.container.clientWidth - 20);
+    const containerHeight = Math.max(300, this.container.clientHeight - 20);
     const scaleW = containerWidth / viewport.width;
     const scaleH = containerHeight / viewport.height;
-    const newScale = Math.max(0.1, Math.min(scaleW, scaleH));
-    if (Math.abs(newScale - this.scale) > 0.01) {
-      this.setZoom(newScale);
-    }
+    const newScale = Math.max(0.2, Math.min(scaleW, scaleH));
+    this.setZoom(newScale);
   }
 
   rotate() {
     this.rotation = (this.rotation + 90) % 360;
     if (this.scrollMode === 'continuous') {
-      this.renderContinuous(this.currentPage);
+      this.setupContinuousMode(this.currentPage);
     } else {
-      this.renderPage(this.currentPage, true);
+      this.renderSinglePage(this.currentPage, true);
     }
   }
 
@@ -357,18 +407,14 @@ export class PDFRenderer {
     const savedPage = this.currentPage;
     this.scrollMode = mode;
 
-    // Disconnect observer when leaving continuous mode
-    if (mode === 'single' && this.scrollObserver) {
-      this.scrollObserver.disconnect();
-      this.scrollObserver = null;
-    }
-
     if (mode === 'continuous') {
-      this.renderContinuous(savedPage);
+      this.setupContinuousMode(savedPage);
     } else {
-      this.rendering = false; // reset lock when switching modes
-      this.renderQueue = null;
-      this.renderPage(savedPage, true);
+      if (this.scrollObserver) {
+        this.scrollObserver.disconnect();
+        this.scrollObserver = null;
+      }
+      this.renderSinglePage(savedPage, true);
     }
   }
 
@@ -423,8 +469,8 @@ export class PDFRenderer {
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    canvas.width = scaledViewport.width;
-    canvas.height = scaledViewport.height;
+    canvas.width = Math.floor(scaledViewport.width);
+    canvas.height = Math.floor(scaledViewport.height);
 
     await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
     return canvas;

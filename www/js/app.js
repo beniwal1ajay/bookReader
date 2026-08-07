@@ -104,8 +104,8 @@ class App {
     // Load TOC
     await this.loadTOC();
 
-    // Load thumbnails (lazy)
-    this.loadThumbnails();
+    // Load thumbnails lazily after document render
+    setTimeout(() => this.loadThumbnails(), 300);
 
     // Render bookmarks & annotations sidebars
     this.refreshSidebars();
@@ -145,11 +145,11 @@ class App {
   }
 
   renderCurrentAnnotations() {
-    const annotLayer = document.querySelector('.annotation-layer');
+    const pageNum = this.renderer.currentPage;
+    const annotLayer = document.querySelector(`.annotation-layer[data-page="${pageNum}"]`);
     if (!annotLayer) return;
-    const pageNum = parseInt(annotLayer.dataset.page);
     const wrapper = annotLayer.parentElement;
-    if (!wrapper) return;
+    if (!wrapper || !wrapper.clientWidth) return;
     this.annotations.renderOnPage(
       this.currentDocId, pageNum, annotLayer,
       wrapper.clientWidth, wrapper.clientHeight
