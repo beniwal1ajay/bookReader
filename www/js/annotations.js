@@ -199,45 +199,76 @@ export class Annotations {
 
     const popup = document.createElement('div');
     popup.className = 'note-popup';
-    popup.style.left = anchorEl.style.left;
-    popup.style.top = `calc(${anchorEl.style.top} + 30px)`;
+
+    const leftPercent = parseFloat(anchorEl.style.left) || note.x || 50;
+    const topPercent = parseFloat(anchorEl.style.top) || note.y || 50;
+
+    if (leftPercent > 65) {
+      popup.style.right = (100 - leftPercent) + '%';
+    } else {
+      popup.style.left = leftPercent + '%';
+    }
+
+    if (topPercent > 75) {
+      popup.style.bottom = (100 - topPercent + 2) + '%';
+    } else {
+      popup.style.top = `calc(${topPercent}% + 28px)`;
+    }
+
     popup.innerHTML = `
       <textarea placeholder="Type your note here...">${note.text || ''}</textarea>
-      <div class="note-popup-actions" style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
-        <button class="btn" style="font-size:.75rem;padding:4px 8px;color:var(--danger)" data-action="delete">Delete</button>
-        <button class="btn" style="font-size:.75rem;padding:4px 8px;color:var(--text-muted)" data-action="cancel">Cancel</button>
-        <button class="btn btn-primary" style="font-size:.75rem;padding:4px 12px" data-action="save">Save</button>
+      <div class="note-popup-actions">
+        <button class="btn btn-danger-text" data-action="delete" type="button">Delete</button>
+        <button class="btn btn-secondary-text" data-action="cancel" type="button">Cancel</button>
+        <button class="btn btn-primary" data-action="save" type="button">Save</button>
       </div>
     `;
 
-    popup.querySelector('[data-action="save"]').addEventListener('click', (e) => {
-      e.stopPropagation();
+    const preventPropagation = (e) => e.stopPropagation();
+    popup.addEventListener('mousedown', preventPropagation);
+    popup.addEventListener('mouseup', preventPropagation);
+    popup.addEventListener('touchstart', preventPropagation, { passive: true });
+    popup.addEventListener('touchend', preventPropagation, { passive: true });
+    popup.addEventListener('click', preventPropagation);
+
+    const btnSave = popup.querySelector('[data-action="save"]');
+    const btnDelete = popup.querySelector('[data-action="delete"]');
+    const btnCancel = popup.querySelector('[data-action="cancel"]');
+
+    const handleSave = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
       const text = popup.querySelector('textarea').value;
       this.updateNote(docId, note.id, text);
       popup.remove();
-      anchorEl.title = text || 'Tap to edit / drag to move';
-    });
+      this.renderOnPage(docId, note.page, annotationLayer, pageWidth, pageHeight);
+    };
 
-    popup.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
-      e.stopPropagation();
+    const handleDelete = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
       this.removeAnnotation(docId, note.id);
       popup.remove();
       this.renderOnPage(docId, note.page, annotationLayer, pageWidth, pageHeight);
-    });
+    };
 
-    popup.querySelector('[data-action="cancel"]').addEventListener('click', (e) => {
-      e.stopPropagation();
+    const handleCancel = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
       popup.remove();
-    });
+    };
 
-    popup.addEventListener('click', e => e.stopPropagation());
+    btnSave.addEventListener('click', handleSave);
+    btnDelete.addEventListener('click', handleDelete);
+    btnCancel.addEventListener('click', handleCancel);
+
+    btnSave.addEventListener('touchstart', handleSave, { passive: false });
+    btnDelete.addEventListener('touchstart', handleDelete, { passive: false });
+    btnCancel.addEventListener('touchstart', handleCancel, { passive: false });
+
     annotationLayer.appendChild(popup);
 
-    // Focus text area automatically
     setTimeout(() => {
       const textarea = popup.querySelector('textarea');
       if (textarea) textarea.focus();
-    }, 50);
+    }, 60);
   }
 
   renderSidebar(docId, container, onNavigate) {

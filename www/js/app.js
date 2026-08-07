@@ -337,6 +337,13 @@ class App {
       this.addNoteAtCenter();
     });
 
+    // Dismiss note popup when tapping outside
+    document.addEventListener('pointerdown', (e) => {
+      if (!e.target.closest('.note-popup') && !e.target.closest('.sticky-note') && !e.target.closest('#btn-add-note')) {
+        document.querySelectorAll('.note-popup').forEach(p => p.remove());
+      }
+    });
+
     // Text selection for highlighting (mouseup & touchend)
     const canvasContainer = document.getElementById('canvas-container');
     const handleHighlightCapture = () => {
