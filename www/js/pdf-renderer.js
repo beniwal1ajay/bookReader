@@ -11,8 +11,10 @@ export class PDFRenderer {
     this.rotation = 0;
     this.scrollMode = 'single'; // 'single' or 'continuous'
     this.rendering = false;
+    this.renderQueue = null; // queued page number to render after current finishes
     this.pageCache = new Map();
     this.container = document.getElementById('canvas-container');
+    this.scrollObserver = null; // track observer so we can disconnect
     this.fileName = '';
     this.fileSize = 0;
     this.onPageChange = null;
@@ -22,6 +24,7 @@ export class PDFRenderer {
   async loadDocument(fileData, fileName, fileSize) {
     this.fileName = fileName;
     this.fileSize = fileSize;
+    this.currentPage = 1;
     this.showLoading('Loading document...');
 
     try {
@@ -29,9 +32,12 @@ export class PDFRenderer {
       this.pdfDoc = await loadingTask.promise;
       this.totalPages = this.pdfDoc.numPages;
       this.rotation = 0;
+      this.rendering = false;
+      this.renderQueue = null;
       this.pageCache.clear();
 
       document.getElementById('page-total').textContent = this.totalPages;
+      document.getElementById('page-input').max = this.totalPages;
       this.hideLoading();
 
       if (this.onDocLoaded) {
@@ -47,13 +53,25 @@ export class PDFRenderer {
 
   async renderPage(pageNum, forceRerender = false) {
     if (!this.pdfDoc || pageNum < 1 || pageNum > this.totalPages) return;
-    if (this.rendering && !forceRerender) return;
+
+    // If already rendering, queue the request instead of dropping it
+    if (this.rendering && !forceRerender) {
+      this.renderQueue = pageNum;
+      return;
+    }
+
     this.rendering = true;
     this.currentPage = pageNum;
 
     try {
       if (this.scrollMode === 'single') {
         await this.renderSinglePage(pageNum);
+      } else {
+        // In continuous mode, just scroll to the page
+        const wrapper = this.container.querySelector(`.page-wrapper[data-page="${pageNum}"]`);
+        if (wrapper) {
+          wrapper.scrollIntoView({ behavior: 'smooth' });
+        }
       }
       // Update page input
       document.getElementById('page-input').value = pageNum;
@@ -61,7 +79,15 @@ export class PDFRenderer {
     } catch (err) {
       console.error('Render error:', err);
     }
+
     this.rendering = false;
+
+    // Process queued render request
+    if (this.renderQueue !== null) {
+      const queuedPage = this.renderQueue;
+      this.renderQueue = null;
+      await this.renderPage(queuedPage);
+    }
   }
 
   async renderSinglePage(pageNum) {
@@ -72,6 +98,7 @@ export class PDFRenderer {
     this.container.innerHTML = '';
     const wrapper = document.createElement('div');
     wrapper.className = 'page-wrapper';
+    wrapper.dataset.page = pageNum;
     wrapper.style.width = viewport.width + 'px';
     wrapper.style.height = viewport.height + 'px';
 
@@ -115,7 +142,14 @@ export class PDFRenderer {
     return { wrapper, textLayer, annotationLayer, viewport, page };
   }
 
-  async renderContinuous() {
+  async renderContinuous(scrollToPage = null) {
+    // Disconnect old observer
+    if (this.scrollObserver) {
+      this.scrollObserver.disconnect();
+      this.scrollObserver = null;
+    }
+
+    const targetPage = scrollToPage || this.currentPage;
     this.container.innerHTML = '';
 
     for (let i = 1; i <= this.totalPages; i++) {
@@ -156,25 +190,45 @@ export class PDFRenderer {
       this.renderTextLayer(textContent, textLayer, viewport);
     }
 
-    // Scroll observer for continuous mode
+    // Scroll to the target page after rendering
+    const targetWrapper = this.container.querySelector(`.page-wrapper[data-page="${targetPage}"]`);
+    if (targetWrapper) {
+      // Use instant scroll so user sees the right page immediately
+      targetWrapper.scrollIntoView({ behavior: 'instant', block: 'start' });
+    }
+
+    // Setup scroll observer for continuous mode
     this.setupScrollObserver();
   }
 
   setupScrollObserver() {
-    const observer = new IntersectionObserver((entries) => {
+    // Disconnect old observer if any
+    if (this.scrollObserver) {
+      this.scrollObserver.disconnect();
+    }
+
+    this.scrollObserver = new IntersectionObserver((entries) => {
+      // Find the most visible page
+      let bestEntry = null;
+      let bestRatio = 0;
       entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const pageNum = parseInt(entry.target.dataset.page);
-          if (pageNum && pageNum !== this.currentPage) {
-            this.currentPage = pageNum;
-            document.getElementById('page-input').value = pageNum;
-            if (this.onPageChange) this.onPageChange(pageNum, this.totalPages);
-          }
+        if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
+          bestRatio = entry.intersectionRatio;
+          bestEntry = entry;
         }
       });
-    }, { root: this.container, threshold: 0.5 });
 
-    this.container.querySelectorAll('.page-wrapper').forEach(w => observer.observe(w));
+      if (bestEntry) {
+        const pageNum = parseInt(bestEntry.target.dataset.page);
+        if (pageNum && pageNum !== this.currentPage) {
+          this.currentPage = pageNum;
+          document.getElementById('page-input').value = pageNum;
+          if (this.onPageChange) this.onPageChange(pageNum, this.totalPages);
+        }
+      }
+    }, { root: this.container, threshold: [0.1, 0.25, 0.5, 0.75] });
+
+    this.container.querySelectorAll('.page-wrapper').forEach(w => this.scrollObserver.observe(w));
   }
 
   renderTextLayer(textContent, textLayerDiv, viewport) {
@@ -203,13 +257,13 @@ export class PDFRenderer {
   // Navigation
   nextPage() {
     if (this.currentPage < this.totalPages) {
-      this.renderPage(this.currentPage + 1);
+      this.goToPage(this.currentPage + 1);
     }
   }
 
   prevPage() {
     if (this.currentPage > 1) {
-      this.renderPage(this.currentPage - 1);
+      this.goToPage(this.currentPage - 1);
     }
   }
 
@@ -217,7 +271,9 @@ export class PDFRenderer {
     const p = Math.max(1, Math.min(num, this.totalPages));
     if (this.scrollMode === 'continuous') {
       const wrapper = this.container.querySelector(`.page-wrapper[data-page="${p}"]`);
-      if (wrapper) wrapper.scrollIntoView({ behavior: 'smooth' });
+      if (wrapper) {
+        wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       this.currentPage = p;
       document.getElementById('page-input').value = p;
       if (this.onPageChange) this.onPageChange(p, this.totalPages);
@@ -231,12 +287,13 @@ export class PDFRenderer {
   zoomOut() { this.setZoom(Math.max(this.scale - 0.2, 0.3)); }
 
   setZoom(newScale) {
+    const savedPage = this.currentPage;
     this.scale = Math.round(newScale * 100) / 100;
     document.getElementById('zoom-display').textContent = Math.round(this.scale * 100) + '%';
     if (this.scrollMode === 'continuous') {
-      this.renderContinuous();
+      this.renderContinuous(savedPage);
     } else {
-      this.renderPage(this.currentPage, true);
+      this.renderPage(savedPage, true);
     }
   }
 
@@ -264,7 +321,11 @@ export class PDFRenderer {
     const viewport = page.getViewport({ scale: 1, rotation: this.rotation });
     const containerWidth = this.container.clientWidth - 20;
     if (containerWidth <= 0) return;
-    this.setZoom(Math.max(0.1, containerWidth / viewport.width));
+    const newScale = Math.max(0.1, containerWidth / viewport.width);
+    // Only re-render if scale actually changed
+    if (Math.abs(newScale - this.scale) > 0.01) {
+      this.setZoom(newScale);
+    }
   }
 
   async fitPage() {
@@ -277,24 +338,37 @@ export class PDFRenderer {
     if (containerWidth <= 0 || containerHeight <= 0) return;
     const scaleW = containerWidth / viewport.width;
     const scaleH = containerHeight / viewport.height;
-    this.setZoom(Math.max(0.1, Math.min(scaleW, scaleH)));
+    const newScale = Math.max(0.1, Math.min(scaleW, scaleH));
+    if (Math.abs(newScale - this.scale) > 0.01) {
+      this.setZoom(newScale);
+    }
   }
 
   rotate() {
     this.rotation = (this.rotation + 90) % 360;
     if (this.scrollMode === 'continuous') {
-      this.renderContinuous();
+      this.renderContinuous(this.currentPage);
     } else {
       this.renderPage(this.currentPage, true);
     }
   }
 
   setScrollMode(mode) {
+    const savedPage = this.currentPage;
     this.scrollMode = mode;
+
+    // Disconnect observer when leaving continuous mode
+    if (mode === 'single' && this.scrollObserver) {
+      this.scrollObserver.disconnect();
+      this.scrollObserver = null;
+    }
+
     if (mode === 'continuous') {
-      this.renderContinuous();
+      this.renderContinuous(savedPage);
     } else {
-      this.renderPage(this.currentPage, true);
+      this.rendering = false; // reset lock when switching modes
+      this.renderQueue = null;
+      this.renderPage(savedPage, true);
     }
   }
 
