@@ -88,12 +88,15 @@ class App {
   async onDocLoaded(pdfDoc, fileName, fileSize) {
     this.library.addRecent(fileName, pdfDoc.numPages, fileSize);
 
-    // Resume last position
+    // Resume last saved position
     const lastPage = this.bookmarks.getLastPage(this.currentDocId);
+    if (lastPage > 1 && lastPage <= pdfDoc.numPages) {
+      this.renderer.currentPage = lastPage;
+    }
+
     await this.renderer.fitWidth();
 
-    // After fitWidth completes, go to last page
-    if (lastPage > 1) {
+    if (lastPage > 1 && lastPage <= pdfDoc.numPages) {
       this.renderer.goToPage(lastPage);
       this.toast(`Resumed from page ${lastPage}`, 'info');
     }
@@ -269,12 +272,18 @@ class App {
     // Back to library
     document.getElementById('btn-back').addEventListener('click', () => this.showView('library'));
 
-    // Page navigation
+    // Page navigation (Toolbar)
     document.getElementById('btn-prev').addEventListener('click', () => this.renderer.prevPage());
     document.getElementById('btn-next').addEventListener('click', () => this.renderer.nextPage());
     document.getElementById('page-input').addEventListener('change', (e) => {
       this.renderer.goToPage(parseInt(e.target.value));
     });
+
+    // Floating Side Navigation Buttons (Middle of screen)
+    const btnFloatPrev = document.getElementById('floating-btn-prev');
+    const btnFloatNext = document.getElementById('floating-btn-next');
+    if (btnFloatPrev) btnFloatPrev.addEventListener('click', () => this.renderer.prevPage());
+    if (btnFloatNext) btnFloatNext.addEventListener('click', () => this.renderer.nextPage());
 
     // Zoom
     document.getElementById('btn-zoom-in').addEventListener('click', () => this.renderer.zoomIn());
@@ -290,8 +299,7 @@ class App {
       const mode = this.renderer.toggleScrollMode();
       this.settings.setScrollMode(mode);
       this.toast(`${mode === 'continuous' ? 'Continuous' : 'Single page'} mode`, 'info');
-      // Re-render annotations after mode change
-      setTimeout(() => this.renderCurrentAnnotations(), 500);
+      setTimeout(() => this.renderCurrentAnnotations(), 300);
     });
 
     // Sidebar toggle
@@ -329,11 +337,14 @@ class App {
       this.addNoteAtCenter();
     });
 
-    // Text selection for highlighting
-    document.getElementById('canvas-container').addEventListener('mouseup', () => {
+    // Text selection for highlighting (mouseup & touchend)
+    const canvasContainer = document.getElementById('canvas-container');
+    const handleHighlightCapture = () => {
       if (!this.annotations.highlightMode) return;
-      this.captureHighlight();
-    });
+      setTimeout(() => this.captureHighlight(), 50);
+    };
+    canvasContainer.addEventListener('mouseup', handleHighlightCapture);
+    canvasContainer.addEventListener('touchend', handleHighlightCapture);
 
     // Theme
     document.getElementById('btn-theme').addEventListener('click', () => {
@@ -370,101 +381,31 @@ class App {
       if (r) this.renderer.goToPage(r.page);
     });
 
-    // Shortcuts modal
-    document.getElementById('btn-shortcuts').addEventListener('click', () => {
-      document.getElementById('shortcuts-modal').classList.add('active');
-    });
-    document.getElementById('shortcuts-close').addEventListener('click', () => {
-      document.getElementById('shortcuts-modal').classList.remove('active');
-    });
-
-    // Go-to-page modal
-    document.getElementById('goto-cancel').addEventListener('click', () => {
-      document.getElementById('goto-modal').classList.remove('active');
-    });
-    document.getElementById('goto-go').addEventListener('click', () => {
-      const val = parseInt(document.getElementById('goto-input').value);
-      if (val) this.renderer.goToPage(val);
-      document.getElementById('goto-modal').classList.remove('active');
-    });
-    document.getElementById('goto-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const val = parseInt(e.target.value);
-        if (val) this.renderer.goToPage(val);
-        document.getElementById('goto-modal').classList.remove('active');
-      }
-    });
-
-    // Close modals on overlay click
-    document.querySelectorAll('.modal-overlay').forEach(overlay => {
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.classList.remove('active');
-      });
-    });
-
     // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => this.handleKeyboard(e));
-  }
-
-  // ===== Keyboard Shortcuts =====
-  handleKeyboard(e) {
-    // Skip if typing in input
-    const tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') {
-      if (e.key === 'Escape') e.target.blur();
-      return;
-    }
-
-    const readerActive = document.getElementById('reader-view').style.display !== 'none';
-    if (!readerActive) return;
-
-    switch(e.key) {
-      case 'ArrowLeft':
-        e.preventDefault(); this.renderer.prevPage(); break;
-      case 'ArrowRight':
-        e.preventDefault(); this.renderer.nextPage(); break;
-      case '+': case '=':
-        e.preventDefault(); this.renderer.zoomIn(); break;
-      case '-':
-        e.preventDefault(); this.renderer.zoomOut(); break;
-      case 'f':
-        if (!e.ctrlKey) { e.preventDefault(); this.toggleFullscreen(); } break;
-      case 's':
-        if (!e.ctrlKey) { e.preventDefault(); this.toggleSidebar(); } break;
-      case 'b':
-        e.preventDefault(); this.toggleBookmark(); break;
-      case 'h':
-        e.preventDefault();
-        const mode = this.annotations.toggleHighlightMode();
-        this.toast(mode ? 'Highlight mode ON' : 'Highlight mode OFF', 'info');
-        break;
-      case 'd':
-        e.preventDefault();
-        const theme = this.settings.cycleTheme();
-        this.toast(`${theme.charAt(0).toUpperCase() + theme.slice(1)} mode`, 'info');
-        break;
-      case 'r':
-        e.preventDefault(); this.renderer.rotate(); break;
-      case '?':
-        e.preventDefault();
-        document.getElementById('shortcuts-modal').classList.add('active'); break;
-      case 'Escape':
-        this.closeAllOverlays(); break;
-    }
-
-    // Ctrl shortcuts
-    if (e.ctrlKey) {
-      if (e.key === 'f') {
-        e.preventDefault(); this.search.open();
-      } else if (e.key === 'g') {
-        e.preventDefault();
-        document.getElementById('goto-modal').classList.add('active');
-        setTimeout(() => document.getElementById('goto-input').focus(), 100);
+    document.addEventListener('keydown', (e) => {
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+      if (document.getElementById('reader-view').classList.contains('active')) {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') this.renderer.nextPage();
+        if (e.key === 'ArrowLeft' || e.key === 'PageUp') this.renderer.prevPage();
+        if (e.key === '+' || e.key === '=') this.renderer.zoomIn();
+        if (e.key === '-') this.renderer.zoomOut();
+        if (e.key === '0') this.renderer.fitWidth();
+        if (e.key === 'r' || e.key === 'R') this.renderer.rotate();
+        if (e.key === 'b' || e.key === 'B') this.toggleBookmark();
+        if (e.key === 'h' || e.key === 'H') {
+          const mode = this.annotations.toggleHighlightMode();
+          this.toast(mode ? 'Highlight mode ON — select text' : 'Highlight mode OFF', 'info');
+        }
+        if (e.key === 'f' || e.key === 'F') this.toggleFullscreen();
+        if (e.key === 'd' || e.key === 'D') {
+          const theme = this.settings.cycleTheme();
+          this.toast(`${theme.charAt(0).toUpperCase() + theme.slice(1)} mode`, 'info');
+        }
+        if (e.key === 'Escape') this.closeAllOverlays();
       }
-    }
+    });
   }
 
-  // ===== Actions =====
   toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     sidebar.classList.toggle('collapsed');
@@ -499,27 +440,37 @@ class App {
     if (!text) return;
 
     const range = selection.getRangeAt(0);
-    const wrapper = document.querySelector('.page-wrapper');
+    let wrapper = null;
+    if (range.commonAncestorContainer) {
+      const parent = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      if (parent) wrapper = parent.closest('.page-wrapper');
+    }
+    if (!wrapper) {
+      wrapper = document.querySelector(`.page-wrapper[data-page="${this.renderer.currentPage}"]`);
+    }
     if (!wrapper) return;
 
+    const pageNum = parseInt(wrapper.dataset.page) || this.renderer.currentPage;
     const wrapperRect = wrapper.getBoundingClientRect();
     const rects = [];
 
     const clientRects = range.getClientRects();
     for (let i = 0; i < clientRects.length; i++) {
       const r = clientRects[i];
-      rects.push({
-        x: r.left - wrapperRect.left,
-        y: r.top - wrapperRect.top,
-        w: r.width,
-        h: r.height
-      });
+      if (r.width > 0 && r.height > 0) {
+        rects.push({
+          x: r.left - wrapperRect.left,
+          y: r.top - wrapperRect.top,
+          w: r.width,
+          h: r.height
+        });
+      }
     }
 
     if (rects.length > 0) {
       this.annotations.addHighlight(
         this.currentDocId,
-        this.renderer.currentPage,
+        pageNum,
         text, rects,
         this.annotations.activeColor
       );
@@ -532,14 +483,29 @@ class App {
 
   addNoteAtCenter() {
     if (!this.currentDocId) return;
-    this.annotations.addNote(
+    const pageNum = this.renderer.currentPage;
+    const note = this.annotations.addNote(
       this.currentDocId,
-      this.renderer.currentPage,
-      50, 50, ''
+      pageNum,
+      40, 40, ''
     );
     this.renderCurrentAnnotations();
     this.refreshSidebars();
-    this.toast('Note added — click to edit', 'info');
+
+    // Auto-open popup editor for the new note
+    const annotLayer = document.querySelector(`.annotation-layer[data-page="${pageNum}"]`);
+    if (annotLayer) {
+      const notes = annotLayer.querySelectorAll('.sticky-note');
+      const lastNoteEl = notes[notes.length - 1];
+      if (lastNoteEl) {
+        const wrapper = annotLayer.parentElement;
+        this.annotations.showNotePopup(
+          this.currentDocId, note, lastNoteEl, annotLayer,
+          wrapper.clientWidth, wrapper.clientHeight
+        );
+      }
+    }
+    this.toast('Note added — type and tap Save', 'info');
   }
 
   closeAllOverlays() {
